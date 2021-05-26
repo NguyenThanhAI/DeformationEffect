@@ -6,6 +6,8 @@ import math
 
 import time
 
+import imageio
+
 import numpy as np
 
 from scipy import interpolate
@@ -31,13 +33,13 @@ def compute_deform_image_list(i: int, img: np.ndarray, global_grid_x: np.ndarray
     deformed_img_1 = ndimage.map_coordinates(img[:, :, 1], coord).reshape(height, width)
     deformed_img_2 = ndimage.map_coordinates(img[:, :, 2], coord).reshape(height, width)
 
-    deformed_img = np.stack([deformed_img_0, deformed_img_1, deformed_img_2], axis=-1)
+    deformed_img = np.stack([deformed_img_2, deformed_img_1, deformed_img_0], axis=-1)
 
     return deformed_img
 
 
 def create_images_list(img: np.ndarray, magnitude: int, grid_height: int, grid_width: int,
-                       num_timesteps: int, n_proc: int):
+                       num_timesteps: int, n_proc: int, show_image: bool, transform_type: str) -> list:
     height, width, _ = img.shape
 
     if width % grid_width != 0:
@@ -53,7 +55,12 @@ def create_images_list(img: np.ndarray, magnitude: int, grid_height: int, grid_w
     index = np.array(np.meshgrid(np.array(x), np.array(y)))
     x, y = np.meshgrid(np.array(x), np.array(y))
 
-    displacement = np.random.randint(-magnitude, magnitude, (index.shape[0], index.shape[1], index.shape[2]))
+    if transform_type == "random":
+        displacement = np.random.randint(-magnitude, magnitude, (index.shape[0], index.shape[1], index.shape[2]))
+    elif transform_type == "sin":
+        displacement = np.array([25. * np.sin(2 * np.pi * x / 180), 25. * np.sin(2 * np.pi * y / 180)])
+    else:
+        raise ValueError("Not in supported transform type")
 
     index_x = x.ravel()
     index_y = y.ravel()
@@ -78,30 +85,44 @@ def create_images_list(img: np.ndarray, magnitude: int, grid_height: int, grid_w
                            alpha_x=alpha_x, alpha_y=alpha_y, height=height, width=width)
 
     images_list = []
-    images_list.append(img)
+    images_list.append(img[:, :, ::-1])
 
-    start = time.time()
+    #start = time.time()
     with Pool(n_proc) as pool:
         image_list = pool.map(compute_func, list(range(1, num_timesteps + 2))) # Rất quan trọng, biến số được iterate biến đổi luôn là tham số vị trí đầu tiên khi định nghĩa hàm
-    end = time.time()
-    print(end - start)
+    #end = time.time()
+    #print(end - start)
 
     #print(len(image_list))
 
     images_list.extend(image_list)
 
-    while True:
-        for deform_img in images_list:
-            cv2.imshow("Multiprocess Deformed img", deform_img)
-            cv2.waitKey(50)
+    if show_image:
+        while True:
+            for deform_img in images_list:
+                cv2.imshow("Multiprocess Deformed img", deform_img[:, :, ::-1])
+                cv2.waitKey(50)
 
-        for deform_img in reversed(images_list[:-1]):
-            cv2.imshow("Multiprocess Deformed img", deform_img)
-            cv2.waitKey(50)
-        break
-    cv2.destroyAllWindows()
+            for deform_img in reversed(images_list[:-1]):
+                cv2.imshow("Multiprocess Deformed img", deform_img[:, :, ::-1])
+                cv2.waitKey(50)
+            break
+        cv2.destroyAllWindows()
+
+    images_list.extend(list(reversed(images_list[:-1])))
 
     return images_list
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def get_args():
@@ -113,6 +134,9 @@ def get_args():
     parser.add_argument("--grid_width", type=int, default=100)
     parser.add_argument("--num_timesteps", type=int, default=10)
     parser.add_argument("--n_proc", type=int, default=6)
+    parser.add_argument("--save_dir", type=str, default=".")
+    parser.add_argument("--show_image", type=str2bool, default=False)
+    parser.add_argument("--transform_type", type=str, choices=["random", "sin"], default="random")
 
     args = parser.parse_args()
 
@@ -134,5 +158,17 @@ if __name__ == '__main__':
 
     n_proc = args.n_proc
 
+    show_image = args.show_image
+
+    transform_type = args.transform_type
+
     images_list = create_images_list(img=img, magnitude=magnitude, grid_height=grid_height,
-                                     grid_width=grid_width, num_timesteps=num_timesteps, n_proc=n_proc)
+                                     grid_width=grid_width, num_timesteps=num_timesteps, n_proc=n_proc,
+                                     show_image=show_image, transform_type=transform_type)
+
+
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir, exist_ok=True)
+#
+    imageio.mimsave(os.path.join(args.save_dir, os.path.splitext(os.path.basename(image_path))[0] + ".gif"),
+                    images_list)
