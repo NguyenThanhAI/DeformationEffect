@@ -1,6 +1,7 @@
 import os
 
-import time
+import argparse
+
 import math
 
 import time
@@ -35,15 +36,9 @@ def compute_deform_image_list(i: int, img: np.ndarray, global_grid_x: np.ndarray
     return deformed_img
 
 
-if __name__ == '__main__':
-    image_path = "cach-chup-anh-dep-tai-da-lat-1-2306.jpeg"
-
-    img = cv2.imread(image_path)
+def create_images_list(img: np.ndarray, magnitude: int, grid_height: int, grid_width: int,
+                       num_timesteps: int, n_proc: int):
     height, width, _ = img.shape
-    magnitude = 30
-
-    grid_height = 100
-    grid_width = 100
 
     if width % grid_width != 0:
         x = list(range(0, width, grid_width)) + [width - 1]
@@ -59,7 +54,6 @@ if __name__ == '__main__':
     x, y = np.meshgrid(np.array(x), np.array(y))
 
     displacement = np.random.randint(-magnitude, magnitude, (index.shape[0], index.shape[1], index.shape[2]))
-    #displacement = np.array([2 * np.multiply(x, y) / 1000, (np.square(x) - np.square(y)) / 1000])
 
     index_x = x.ravel()
     index_y = y.ravel()
@@ -77,45 +71,8 @@ if __name__ == '__main__':
 
     global_grid_x, global_grid_y = np.meshgrid(np.arange(width), np.arange(height))
 
-    global_coord_x = displacement_new_x + global_grid_x
-    global_coord_y = displacement_new_y + global_grid_y
-
-    coord = np.array([global_coord_y.ravel(), global_coord_x.ravel()])
-
-    num_timesteps = 10 # number of steps between 2 pole arrays
-
     alpha_x = displacement_new_x / (num_timesteps + 1)
     alpha_y = displacement_new_y / (num_timesteps + 1)
-
-    #numpy_images_list = []
-    #numpy_images_list.append(img)
-    #st = time.time()
-    #for i in range(1, num_timesteps + 2):
-    #    global_x = global_grid_x + alpha_x * i
-    #    global_y = global_grid_y + alpha_y * i
-    #    coord = np.array([global_y.ravel(), global_x.ravel()])
-#
-    #    deformed_img_0 = ndimage.map_coordinates(img[:, :, 0], coord).reshape(height, width)
-    #    deformed_img_1 = ndimage.map_coordinates(img[:, :, 1], coord).reshape(height, width)
-    #    deformed_img_2 = ndimage.map_coordinates(img[:, :, 2], coord).reshape(height, width)
-#
-    #    deformed_img = np.stack([deformed_img_0, deformed_img_1, deformed_img_2], axis=-1)
-#
-    #    numpy_images_list.append(deformed_img)
-#
-    #end = time.time()
-    #print(end - st)
-#
-    #while True:
-    #    for deform_img in numpy_images_list:
-    #        cv2.imshow("Deformed img", deform_img)
-    #        cv2.waitKey(25)
-#
-    #    for deform_img in reversed(numpy_images_list[:-1]):
-    #        cv2.imshow("Deformed img", deform_img)
-    #        cv2.waitKey(25)
-    #    break
-    #cv2.destroyAllWindows()
 
     compute_func = partial(compute_deform_image_list, img=img, global_grid_x=global_grid_x, global_grid_y=global_grid_y,
                            alpha_x=alpha_x, alpha_y=alpha_y, height=height, width=width)
@@ -124,7 +81,7 @@ if __name__ == '__main__':
     images_list.append(img)
 
     start = time.time()
-    with Pool(8) as pool:
+    with Pool(n_proc) as pool:
         image_list = pool.map(compute_func, list(range(1, num_timesteps + 2))) # Rất quan trọng, biến số được iterate biến đổi luôn là tham số vị trí đầu tiên khi định nghĩa hàm
     end = time.time()
     print(end - start)
@@ -141,8 +98,41 @@ if __name__ == '__main__':
         for deform_img in reversed(images_list[:-1]):
             cv2.imshow("Multiprocess Deformed img", deform_img)
             cv2.waitKey(50)
-        #break
+        break
     cv2.destroyAllWindows()
 
-    #compare = [np.all(np.equal(image1, image2)) for image1, image2 in zip(numpy_images_list, images_list)]
-    #print(compare)
+    return images_list
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--image_path", type=str, default=None)
+    parser.add_argument("--magnitude", type=int, default=30)
+    parser.add_argument("--grid_height", type=int, default=100)
+    parser.add_argument("--grid_width", type=int, default=100)
+    parser.add_argument("--num_timesteps", type=int, default=10)
+    parser.add_argument("--n_proc", type=int, default=6)
+
+    args = parser.parse_args()
+
+    return args
+
+
+if __name__ == '__main__':
+
+    args = get_args()
+    image_path = args.image_path
+
+    img = cv2.imread(image_path)
+    magnitude = args.magnitude
+
+    grid_height = args.grid_height
+    grid_width = args.grid_width
+
+    num_timesteps = args.num_timesteps # number of steps between 2 pole arrays
+
+    n_proc = args.n_proc
+
+    images_list = create_images_list(img=img, magnitude=magnitude, grid_height=grid_height,
+                                     grid_width=grid_width, num_timesteps=num_timesteps, n_proc=n_proc)
